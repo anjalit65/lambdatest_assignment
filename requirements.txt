@@ -1,0 +1,9 @@
+uvicorn==0.23.1
+fastapi==0.103.1
+selenium 
+Pillow 
+langchain
+torch 
+transformers
+chromedriver-py==129.0.6668.70
+openai
