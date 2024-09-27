@@ -6,17 +6,60 @@ from selenium.webdriver.chrome.service import Service
 from PIL import Image
 import time
 import os
-import torch
 from transformers import CLIPProcessor, CLIPModel
 from langchain.llms import OpenAI
-from langchain.prompts import PromptTemplate
-import openai
+import google.generativeai as genai
+import os
 app = FastAPI()
 
 
 class URLInput(BaseModel):
     url: str
 
+def take_fullpage_screenshot(url: str, save_path: str):
+    """Takes a full-page screenshot by scrolling through the entire page."""
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    service = Service(executable_path="/Users/anjalitripathi/anaconda3/envs/LT/lib/python3.10/site-packages/chromedriver_py/chromedriver_mac-arm64")
+    driver = webdriver.Chrome(service=service, options=options)
+
+    try:
+        driver.get(url)
+        time.sleep(2)  # Allow the page to load
+
+        # Get the total height of the page
+        total_height = driver.execute_script("return document.body.scrollHeight")
+        viewport_height = driver.execute_script("return window.innerHeight")
+
+        stitched_image = Image.new("RGB", (driver.execute_script("return document.body.scrollWidth"), total_height))
+
+        scroll_position = 0
+        while scroll_position < total_height:
+            driver.execute_script(f"window.scrollTo(0, {scroll_position});")
+            time.sleep(0.5)  # Allow time for content to load after scrolling
+
+            # Take a screenshot of the visible area
+            screenshot_path = os.path.join(save_path, f"screenshot_{scroll_position}.png")
+            driver.save_screenshot(screenshot_path)
+
+            # Open the screenshot and paste it into the stitched image
+            screenshot = Image.open(screenshot_path)
+            stitched_image.paste(screenshot, (0, scroll_position))
+
+            scroll_position += viewport_height
+
+        # Save the final stitched image
+        full_screenshot_path = os.path.join(save_path, "full_screenshot.png")
+        stitched_image.save(full_screenshot_path)
+
+        return full_screenshot_path
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error taking full-page screenshot: {str(e)}")
+    finally:
+        driver.quit()
 
 def take_screenshot(url: str, save_path: str):
     """Uses Selenium to take a screenshot of the given URL."""
@@ -44,59 +87,45 @@ def take_screenshot(url: str, save_path: str):
 
 # can be used in future
 def detect_genre_from_image(image_path: str) -> str:
-    """Detects the genre of the website from the image using a classification model."""
-    # Placeholder: Load and use a pre-trained genre classification model
-    # Here we use a mock function for demonstration purposes
-    # Replace this with actual genre classification code
-    genres = ["e-commerce", "social media", "news", "blog",
-              "education", "corporate", "entertainment", "forum"]
-    # Simulate genre detection
-    return genres[0]  # Assume it always returns 'e-commerce' for demo
+    """Detects the genre of the website from the image using CLIP or a fine-tuned model."""
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
+    # Define potential website genres for classification
+    genres = ["order food", "hotel booking", "clothes", "online_courses","e-commerce","education", "social media", "news", "blog", "corporate", "entertainment", "forum"]
 
+    image = Image.open(image_path)
+
+    # Prepare inputs for CLIP
+    inputs = processor(text=genres, images=image, return_tensors="pt", padding=True)
+    outputs = model(**inputs)
+
+    logits_per_image = outputs.logits_per_image  # similarity scores
+    probs = logits_per_image.softmax(dim=1)  # probabilities
+
+    # Get the genre with the highest probability
+    detected_genre_idx = probs.argmax().item()
+    detected_genre = genres[detected_genre_idx]
+
+    return detected_genre
 # can be used in future
 def generate_potential_actions(genre: str) -> list:
-    """Generates potential actions based on the detected genre using OpenAI API."""
+    """Generates potential actions based on the detected genre using GEMINI API."""
   
-    prompt = f"Given the genre '{genre}', suggest a list of potential actions a user might take on a website of this genre."
+    prompt = f"Given the genre '{genre}', suggest a list of potential actions a user might take on a website of this genre. Return a python list"
 
     try:
-        
+
         # use the commented code if we have enough access to chatgpt api key
-        # llm=OpenAI(temperature=0.7,model_name="gpt-3.5-turbo")
-        # response=llm(prompt)
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
-        # actions = response.choices[0].message['content']
-
-        # return actions.split(',')
-
-        #using a list of actions for now
-        actions = ['Read next post', 'Add friend', 'Enter shipping address', 'Bookmark article', 'Add to cart', 'Choose payment method', 'Share on social media', 'View product details', 'Share article', 'Subscribe to newsletter', 'Download content', 'Like photo/video', 'Proceed to checkout', 'Follow user', 'View posts', 'Leave a comment', 'Apply discount code', 'Send a message', 'Confirm order', 'Subscribe to blog', 'Select size/color',
-                   "Order Food",
-                   "Login",
-                   "Signup",
-                   "Get Delivery",
-                   "Find Restaurant",
-                   "Write Review",
-                   "View Menu",
-                   "Reserve Table",
-                   "Check Reviews",
-                   "Search Dishes",
-                   "Get Directions",
-                   "View Offers",
-                   "View Ratings",
-                   "Update Profile",
-                   "Manage Orders",
-                   "Provide Feedback",
-                   "Contact Support",
-                   "Browse Categories",
-                   "Save Favorite",
-                   "Share Experience",
-                   "Explore Nearby",
-                   "Check Availability"]
-
-        return actions
-    except openai.error.OpenAIError as e:
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        if response.candidates[0].content.parts[0].text:
+            action_list=eval(response.candidates[0].content.parts[0].text.strip("```").strip("``` \n").split("=")[1])
+        print(action_list)
+        return action_list
+    except Exception as e:
         print(f"Error generating actions: {str(e)}")
         raise HTTPException(
             status_code=500, detail="Error generating potential actions.")
@@ -138,26 +167,28 @@ def detect_actions(url_input: URLInput):
     os.makedirs(save_path, exist_ok=True)
 
     try:
-        # Step 1: Take a screenshot of the webpage
-        screenshot_path = take_screenshot(url_input.url, save_path)
+        # Step 1: Take a full-page screenshot of the webpage
+        full_screenshot_path = take_fullpage_screenshot(url_input.url, save_path)
 
         # Step 2: Detect the genre of the website
-        genre = detect_genre_from_image(screenshot_path)
+        genre = detect_genre_from_image(full_screenshot_path)
+        # print(genre)
 
-        # Step 3: Generate potential actions based on the detected genre using LangChain
+        # Step 3: Generate potential actions based on the detected genre
         potential_actions = generate_potential_actions(genre)
-        print(potential_actions)
+        # print(potential_actions)
 
         # Step 4: Extract features from the screenshot using CLIP
-        features = extract_features_from_image(
-            screenshot_path, potential_actions)
+        features = extract_features_from_image(full_screenshot_path, potential_actions)
 
-        return {
+        output={
             "url": url_input.url,
+            "genre":genre,
             "features": features
         }
+        print(output)
+
+        return output
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
