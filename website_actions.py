@@ -22,7 +22,7 @@ def take_multiple_screenshots(url: str, save_path: str):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
 
-    service = Service(executable_path="/Users/anjalitripathi/anaconda3/envs/LT/lib/python3.10/site-packages/chromedriver_py/chromedriver_mac-arm64")
+    service = Service(executable_path="/home/anjalit/lambdatest_assignment/lambda/lib/python3.10/site-packages/chromedriver_py/chromedriver_linux64")
     driver = webdriver.Chrome(service=service, options=options)
 
     try:
