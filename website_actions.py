@@ -8,7 +8,7 @@ import os
 from transformers import CLIPProcessor, CLIPModel
 import google.generativeai as genai
 import os
-import json
+import json,re
 
 app = FastAPI()
 
@@ -22,7 +22,7 @@ def take_multiple_screenshots(url: str, save_path: str):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
 
-    service = Service(executable_path="/home/anjalit/lambdatest_assignment/lambda/lib/python3.10/site-packages/chromedriver_py/chromedriver_linux64")
+    service = Service(executable_path="/Users/anjalitripathi/anaconda3/envs/LT/lib/python3.10/site-packages/chromedriver_py/chromedriver_mac-arm64")
     driver = webdriver.Chrome(service=service, options=options)
 
     try:
@@ -68,12 +68,21 @@ def generate_potential_actions_from_multiple_screenshots(image_paths: list) -> l
         response = model.generate_content(images + [prompt])
    
         print(response)
-
+        extracted_list=[]
         # Parse the response safely (avoiding eval)
         if response.candidates[0].content.parts[0].text:
-            action_list=eval(response.candidates[0].content.parts[0].text.strip("```python\n").strip("``` \n").split("=")[1])
-        print(action_list)
-        return action_list
+            pattern = r'\[(.*?)\]'
+
+            # Search and extract the list portion
+            match = re.search(pattern,response.candidates[0].content.parts[0].text , re.DOTALL)
+            if match:
+                extracted_list = eval(match.group(0))
+                print(extracted_list)
+            else:
+                print("No match found.")
+            # action_list=eval(response.candidates[0].content.parts[0].text.strip("```python\n").strip('\n```').strip("``` \n").split("=")[1])
+        print(extracted_list)
+        return extracted_list
   
     except Exception as e:
         print(str(e))
